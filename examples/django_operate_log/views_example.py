@@ -6,7 +6,7 @@ Django 视图日志记录示例模块。
 from django.http import JsonResponse
 from django.views import View
 
-from .logger import log_operation, operate_logger
+from operate_log_client import log_operation, operate_logger
 
 
 # 方式1：使用装饰器

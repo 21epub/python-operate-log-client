@@ -1,15 +1,16 @@
 """
-Django 集成日志记录器模块。
+Django 集成模块。
 
-演示如何在 Django 项目中初始化 OperateLogger。
+提供简单的 Django 集成方式，只需在 settings 中配置即可使用。
 """
 
 import threading
 from functools import wraps
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 
-from operate_log_client import OperateLogger
+from .logger import OperateLogger
 
 
 class DjangoOperateLogger:
@@ -29,12 +30,21 @@ class DjangoOperateLogger:
     def __init__(self):
         """初始化Django操作日志管理器。"""
         if not hasattr(self, "initialized"):
+            if not hasattr(settings, "OPERATE_LOG"):
+                raise ImproperlyConfigured("OPERATE_LOG 配置缺失。请在 settings.py 中添加 OPERATE_LOG 配置。")
+
+            config = settings.OPERATE_LOG
+            required_fields = ["kafka_servers", "topic"]
+            missing_fields = [field for field in required_fields if field not in config]
+            if missing_fields:
+                raise ImproperlyConfigured(f"OPERATE_LOG 配置缺少必要字段: {', '.join(missing_fields)}")
+
             self.logger = OperateLogger(
-                kafka_servers=settings.OPERATE_LOG["kafka_servers"],
-                topic=settings.OPERATE_LOG["topic"],
-                application=settings.OPERATE_LOG.get("application", "django_app"),
-                environment=settings.OPERATE_LOG.get("environment", "production"),
-                kafka_config=settings.OPERATE_LOG.get("kafka_config", {}),
+                kafka_servers=config["kafka_servers"],
+                topic=config["topic"],
+                application=config.get("application", "django_app"),
+                environment=config.get("environment", "production"),
+                kafka_config=config.get("kafka_config", {}),
             )
             self.initialized = True
 
@@ -99,9 +109,3 @@ def log_operation(operation_type=None, target=None, details=None):
         return wrapper
 
     return decorator
-
-
-"""
-Django 集成日志记录器示例。
-演示如何在 Django 项目中初始化 OperateLogger。
-"""
