@@ -3,14 +3,15 @@ Django 集成模块。
 
 提供简单的 Django 集成方式，只需在 settings 中配置即可使用。
 """
-
+import json
 import threading
 from functools import wraps
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
+from django.http import HttpRequest
 
-from .logger import OperateLogger
+from ..logger import OperateLogger
 
 
 class DjangoOperateLogger:
@@ -62,15 +63,32 @@ class DjangoOperateLogger:
 
 
 # 创建全局单例实例
-operate_logger = DjangoOperateLogger()
+try:
+    operate_logger = DjangoOperateLogger()
+except ImproperlyConfigured:
+    operate_logger = None
 
 
-def log_operation(operation_type=None, target=None, details=None):
+def log_operation(
+    operation_type=None, target=None, details=None, log_response=False, log_request=False
+):
     """
     操作日志装饰器。
 
+    参数:
+        operation_type (str, optional): 操作类型
+        target (str or callable, optional): 操作目标
+        details (dict or callable, optional): 操作详情
+        log_response (bool, optional): 是否记录返回值，默认为 False
+        log_request (bool, optional): 是否记录请求参数，默认为 False
+
     使用示例:
-    @log_operation(operation_type="CREATE_USER", target="user")
+    @log_operation(
+        operation_type="CREATE_USER",
+        target="user",
+        log_response=True,
+        log_request=True
+    )
     def create_user(request, *args, **kwargs):
         # 函数实现
         pass
@@ -79,6 +97,20 @@ def log_operation(operation_type=None, target=None, details=None):
     def decorator(func):
         @wraps(func)
         def wrapper(request, *args, **kwargs):
+            if operate_logger is None:
+                return func(request, *args, **kwargs)
+
+            # 检查request参数
+            if not isinstance(request, HttpRequest):
+                # 如果是基于类的视图，尝试从args中获取request
+                for arg in args:
+                    if isinstance(arg, HttpRequest):
+                        request = arg
+                        break
+                else:
+                    # 如果找不到request，直接执行原函数
+                    return func(request, *args, **kwargs)
+
             # 获取操作类型
             op_type = operation_type or f"{func.__name__.upper()}"
 
@@ -88,23 +120,62 @@ def log_operation(operation_type=None, target=None, details=None):
                 op_target = target(request, *args, **kwargs)
 
             # 获取操作详情
-            op_details = details
-            if callable(details):
-                op_details = details(request, *args, **kwargs)
+            log_details = {}
+
+            # 添加请求参数
+            if log_request:
+                request_data = {}
+                # GET 参数
+                if request.GET:
+                    request_data["get"] = dict(request.GET.items())
+                # POST 参数
+                if request.POST:
+                    request_data["post"] = dict(request.POST.items())
+                # 请求体
+                if request.body:
+                    try:
+                        request_data["body"] = json.loads(request.body)
+                    except json.JSONDecodeError:
+                        request_data["body"] = str(request.body)
+                log_details["request"] = request_data
+
+            # 添加自定义详情
+            if details:
+                if callable(details):
+                    custom_details = details(request, *args, **kwargs)
+                else:
+                    custom_details = details
+                log_details.update(custom_details)
+
+            # 执行原函数
+            response = func(request, *args, **kwargs)
+
+            # 添加返回值
+            if log_response:
+                if hasattr(response, "content"):
+                    try:
+                        response_data = json.loads(response.content)
+                        log_details["response"] = response_data
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        log_details["response"] = str(response.content)
+                else:
+                    log_details["response"] = str(response)
 
             # 记录操作日志
             operate_logger.log_operation(
                 operation_type=op_type,
                 operator=request.user.username if hasattr(request, "user") else "system",
                 target=op_target,
-                details=op_details,
-                user_id=getattr(request.user, "tenant_id", None),
-                subuser_id=getattr(request.user, "id", None),
+                details=log_details,
+                user_id=getattr(request.user, "tenant_id", None)
+                if hasattr(request, "user")
+                else None,
+                subuser_id=getattr(request.user, "id", None) if hasattr(request, "user") else None,
                 request_id=request.META.get("HTTP_X_REQUEST_ID"),
                 source_ip=request.META.get("REMOTE_ADDR"),
             )
 
-            return func(request, *args, **kwargs)
+            return response
 
         return wrapper
 

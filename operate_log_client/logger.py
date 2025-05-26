@@ -165,12 +165,11 @@ class OperateLogger:
         # 发送到Kafka
         try:
             future = self.producer.send(self.topic, value=json.loads(log.json()))  # 转换为dict
-            future.get(timeout=10)  # 等待发送完成
+            future.get(timeout=2)  # 等待发送完成
         except KafkaError as e:
             self.logger.error(
                 "Failed to send log to Kafka", extra={"operation_id": operation_id, "error": str(e)}
             )
-            raise
 
         # 本地日志记录
         self.logger.info(
