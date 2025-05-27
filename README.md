@@ -1,6 +1,6 @@
 # 操作日志客户端 (Operation Log Client)
 
-这是一个用于记录操作日志的Python客户端库，支持将日志发送到阿里云SLS（日志服务）。特别适用于多租户系统的操作日志记录。
+这是一个用于记录操作日志的Python客户端库，支持将日志通过Kafka协议发送到阿里云SLS（日志服务）。
 
 ## 特性
 
@@ -199,7 +199,7 @@ operation_ids = logger.log_batch(operations)
 1. 配置示例 (`settings_example.py`):
 ```python
 OPERATE_LOG = {
-    'kafka_servers': ['your-project.endpoint:port'],
+    'kafka_servers': ['your-project.cn-hangzhou.log.aliyuncs.com:10012'],
     'topic': 'your-logstore.json',
     'application': 'your_django_app',
     'environment': 'production',
@@ -207,53 +207,109 @@ OPERATE_LOG = {
         'security_protocol': 'SASL_SSL',
         'sasl_mechanism': 'PLAIN',
         'sasl_plain_username': 'your-project',
-        'sasl_plain_password': 'your-access-key-id#your-access-key-secret'
+        'sasl_plain_password': '${SLS_ACCESS_KEY_ID}#${SLS_ACCESS_KEY_SECRET}'
     }
 }
 ```
 
 2. 视图示例 (`views_example.py`):
 ```python
-from django.views import View
 from django.http import JsonResponse
-from .logger import log_operation, operate_logger
+from django.utils.decorators import method_decorator
+from django.views import View
+
+from operate_log_client.extensions.django import log_operation, operate_logger
+
 
 class UserView(View):
-    @log_operation(
-        operation_type="CREATE_USER",
-        target="user",
-        details=lambda request, *args, **kwargs: {
-            "username": request.POST.get("username"),
-            "email": request.POST.get("email"),
-            "role": request.POST.get("role")
-        }
-    )
-    def post(self, request):
-        # 创建用户的业务逻辑
-        return JsonResponse({"status": "success"})
+    """用户视图类。"""
 
-    @log_operation(
-        operation_type="UPDATE_USER",
-        target=lambda request, *args, **kwargs: f"user_{kwargs['user_id']}"
+    @method_decorator(
+        log_operation(
+            operation_type="CREATE_USER",
+            target="user",
+            log_response=True,  # 记录返回值
+            log_request=True,   # 记录请求参数
+        )
     )
-    def put(self, request, user_id):
-        # 更新用户的业务逻辑
-        return JsonResponse({"status": "success"})
+    def post(self, request, *args, **kwargs):
+        """处理用户创建请求。"""
+        # 创建用户的逻辑
+        return JsonResponse({
+            "status": "success",
+            "user_id": "user_123",
+            "message": "User created successfully"
+        })
+
+    @method_decorator(
+        log_operation(
+            operation_type="UPDATE_USER",
+            target=lambda request, *args, **kwargs: f"user_{kwargs.get('user_id')}",
+            log_request=True,  # 记录请求参数
+        )
+    )
+    def put(self, request, *args, **kwargs):
+        """处理用户更新请求。"""
+        # 更新用户的逻辑
+        return JsonResponse({
+            "status": "success",
+            "message": "User updated successfully"
+        })
+
+
+# 直接使用logger的示例
+class TeamView(View):
+    """团队视图类。"""
+
+    def post(self, request, *args, **kwargs):
+        """处理团队创建请求。"""
+        # 创建团队的逻辑
+        team_id = "team_123"
+        response = JsonResponse({
+            "status": "success",
+            "team_id": team_id,
+            "message": "Team created successfully"
+        })
+
+        # 记录操作日志
+        operate_logger.log_operation(
+            operation_type="CREATE_TEAM",
+            operator=request.user.username,
+            target=f"team_{team_id}",
+            details={
+                "team_name": request.POST.get("name"),
+                "members": request.POST.getlist("members"),
+                "request": {  # 手动添加请求参数
+                    "post": dict(request.POST.items()),
+                    "headers": {
+                        k: v for k, v in request.META.items()
+                        if k.startswith("HTTP_") or k in ("CONTENT_TYPE", "CONTENT_LENGTH")
+                    }
+                },
+                "response": {  # 手动添加返回值
+                    "status": "success",
+                    "team_id": team_id,
+                    "message": "Team created successfully"
+                }
+            },
+            user_id=request.user.tenant_id,
+            subuser_id=request.user.id,
+        )
+
+        return response
 ```
 
-3. 日志记录器 (`logger.py`):
-```python
-from operate_log_client import OperateLogger
-from django.conf import settings
+3. 装饰器参数说明：
+   - `operation_type`: 操作类型
+   - `target`: 操作目标（可以是字符串或可调用对象）
+   - `details`: 操作详情（可以是字典或可调用对象）
+   - `log_response`: 是否记录返回值（默认为 False）
+   - `log_request`: 是否记录请求参数（默认为 False）
 
-operate_logger = OperateLogger(
-    kafka_servers=settings.OPERATE_LOG['kafka_servers'],
-    topic=settings.OPERATE_LOG['topic'],
-    application=settings.OPERATE_LOG['application'],
-    environment=settings.OPERATE_LOG['environment'],
-    kafka_config=settings.OPERATE_LOG.get('kafka_config', {})
-)
-```
+4. 使用建议：
+   - 对于基于类的视图，必须使用 `@method_decorator` 装饰器
+   - 可以使用 `log_request` 和 `log_response` 参数控制是否记录请求和响应
+   - 对于复杂的日志记录，可以直接使用 `operate_logger` 实例
 
 ## 配置说明
 
