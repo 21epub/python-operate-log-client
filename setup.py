@@ -8,7 +8,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="operate-log-client",
-    version="0.1.0",
+    version="0.1.1",
     packages=find_packages(),
     install_requires=["kafka-python>=2.0.2", "python-json-logger>=2.0.7", "pydantic>=2.0.0"],
     author="21epub",
