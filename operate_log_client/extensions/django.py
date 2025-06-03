@@ -381,6 +381,19 @@ def log_operation(
                 # 记录操作日志
                 if operate_logger and operate_logger.logger:
                     _log_to_console("准备记录操作日志到Kafka", "DEBUG")
+
+                    # 获取用户信息并确保类型正确
+                    user_id = None
+                    subuser_id = None
+                    if hasattr(request, "user") and request.user:
+                        raw_user_id = getattr(request.user, "id", None)
+                        if raw_user_id is not None:
+                            user_id = str(raw_user_id)
+
+                        raw_subuser_id = getattr(request.user, "subuser_id", None)
+                        if raw_subuser_id is not None:
+                            subuser_id = str(raw_subuser_id)
+
                     operate_logger.log_operation(
                         operation_type=op_type,
                         operator=request.user.username
@@ -388,12 +401,8 @@ def log_operation(
                         else "system",
                         target=op_target,
                         details=log_details,
-                        user_id=getattr(request.user, "id", None)
-                        if hasattr(request, "user")
-                        else None,
-                        subuser_id=getattr(request.user, "subuser_id", None)
-                        if hasattr(request, "user")
-                        else None,
+                        user_id=user_id,
+                        subuser_id=subuser_id,
                         request_id=request.META.get("HTTP_X_REQUEST_ID"),
                         source_ip=request.META.get("REMOTE_ADDR"),
                     )

@@ -306,8 +306,16 @@ def _get_user_info(request):
     if hasattr(request, "user") and request.user:
         if hasattr(request.user, "is_authenticated") and request.user.is_authenticated:
             user_info["operator"] = getattr(request.user, "username", str(request.user))
-            user_info["user_id"] = getattr(request.user, "id", None)
-            user_info["subuser_id"] = getattr(request.user, "subuser_id", None)
+
+            # 确保 user_id 是字符串类型
+            user_id = getattr(request.user, "id", None)
+            if user_id is not None:
+                user_info["user_id"] = str(user_id)
+
+            # 确保 subuser_id 是字符串类型
+            subuser_id = getattr(request.user, "subuser_id", None)
+            if subuser_id is not None:
+                user_info["subuser_id"] = str(subuser_id)
         else:
             user_info["operator"] = "anonymous"
 
